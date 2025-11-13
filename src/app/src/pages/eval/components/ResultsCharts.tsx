@@ -2,10 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 
 import { callApi } from '@app/utils/api';
 import CloseIcon from '@mui/icons-material/Close';
+import Box from '@mui/material/Box';
+import Checkbox from '@mui/material/Checkbox';
 import Dialog from '@mui/material/Dialog';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
 import FormControl from '@mui/material/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import IconButton from '@mui/material/IconButton';
 import MenuItem from '@mui/material/MenuItem';
 import Paper from '@mui/material/Paper';
@@ -635,6 +638,216 @@ function PerformanceOverTimeChart({ evalId }: ChartProps) {
   return <canvas ref={lineCanvasRef} style={{ maxHeight: '300px', cursor: 'pointer' }} />;
 }
 
+function TokensChart({ table }: ChartProps) {
+  const tokensCanvasRef = useRef(null);
+  const tokensChartInstance = useRef<Chart | null>(null);
+
+  useEffect(() => {
+    if (!tokensCanvasRef.current) {
+      return;
+    }
+
+    if (tokensChartInstance.current) {
+      tokensChartInstance.current.destroy();
+    }
+
+    // Get token data from each provider
+    const hasTokenData = table.head.prompts.some(
+      (prompt) => prompt.metrics?.tokenUsage?.total && prompt.metrics.tokenUsage.total > 0,
+    );
+
+    if (!hasTokenData) {
+      return;
+    }
+
+    const datasets = [
+      {
+        label: 'Prompt Tokens',
+        data: table.head.prompts.map((prompt) => prompt.metrics?.tokenUsage?.prompt || 0),
+        backgroundColor: '#7eb0d5',
+        stack: 'stack0',
+      },
+      {
+        label: 'Completion Tokens',
+        data: table.head.prompts.map((prompt) => prompt.metrics?.tokenUsage?.completion || 0),
+        backgroundColor: '#fd7f6f',
+        stack: 'stack0',
+      },
+    ];
+
+    const labels = table.head.prompts.map((prompt) => prompt.provider || 'Unknown');
+
+    tokensChartInstance.current = new Chart(tokensCanvasRef.current, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets,
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        plugins: {
+          title: {
+            display: true,
+            text: 'Token Usage by Provider',
+          },
+          legend: {
+            display: true,
+          },
+          tooltip: {
+            callbacks: {
+              footer: (tooltipItems) => {
+                const promptIdx = tooltipItems[0].dataIndex;
+                const total = table.head.prompts[promptIdx].metrics?.tokenUsage?.total || 0;
+                return `Total: ${Intl.NumberFormat(undefined, {
+                  maximumFractionDigits: 0,
+                }).format(total)}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            stacked: true,
+            title: {
+              display: true,
+              text: 'Provider',
+            },
+          },
+          y: {
+            stacked: true,
+            title: {
+              display: true,
+              text: 'Tokens',
+            },
+            ticks: {
+              callback(value) {
+                return Intl.NumberFormat(undefined, {
+                  notation: 'compact',
+                  maximumFractionDigits: 1,
+                }).format(Number(value));
+              },
+            },
+          },
+        },
+      },
+    });
+  }, [table]);
+
+  return <canvas ref={tokensCanvasRef} style={{ maxHeight: '300px' }}></canvas>;
+}
+
+function DurationChart({ table }: ChartProps) {
+  const durationCanvasRef = useRef(null);
+  const durationChartInstance = useRef<Chart | null>(null);
+
+  useEffect(() => {
+    if (!durationCanvasRef.current) {
+      return;
+    }
+
+    if (durationChartInstance.current) {
+      durationChartInstance.current.destroy();
+    }
+
+    // Get duration data from each provider
+    const hasDurationData = table.head.prompts.some(
+      (prompt) => prompt.metrics?.totalLatencyMs && prompt.metrics.totalLatencyMs > 0,
+    );
+
+    if (!hasDurationData) {
+      return;
+    }
+
+    // Calculate average latency per provider
+    const data = table.head.prompts.map((prompt) => {
+      const totalLatency = prompt.metrics?.totalLatencyMs || 0;
+      const numRequests = prompt.metrics?.tokenUsage?.numRequests || 1;
+      return totalLatency / numRequests;
+    });
+
+    const labels = table.head.prompts.map((prompt) => prompt.provider || 'Unknown');
+
+    const datasets = [
+      {
+        label: 'Average Latency',
+        data,
+        backgroundColor: table.head.prompts.map(
+          (_, idx) => COLOR_PALETTE[idx % COLOR_PALETTE.length],
+        ),
+      },
+    ];
+
+    durationChartInstance.current = new Chart(durationCanvasRef.current, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets,
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        plugins: {
+          title: {
+            display: true,
+            text: 'Average Latency by Provider',
+          },
+          legend: {
+            display: false,
+          },
+          tooltip: {
+            callbacks: {
+              label: (context) => {
+                const value = context.parsed.y;
+                return `Avg Latency: ${Intl.NumberFormat(undefined, {
+                  maximumFractionDigits: 0,
+                }).format(value)} ms`;
+              },
+              footer: (tooltipItems) => {
+                const promptIdx = tooltipItems[0].dataIndex;
+                const prompt = table.head.prompts[promptIdx];
+                const tokensPerSec =
+                  prompt.metrics?.totalLatencyMs && prompt.metrics?.tokenUsage?.completion
+                    ? prompt.metrics.tokenUsage.completion / (prompt.metrics.totalLatencyMs / 1000)
+                    : 0;
+                return tokensPerSec > 0
+                  ? `Tokens/Sec: ${Intl.NumberFormat(undefined, {
+                      maximumFractionDigits: 0,
+                    }).format(tokensPerSec)}`
+                  : '';
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            title: {
+              display: true,
+              text: 'Provider',
+            },
+          },
+          y: {
+            title: {
+              display: true,
+              text: 'Latency (ms)',
+            },
+            ticks: {
+              callback(value) {
+                return Intl.NumberFormat(undefined, {
+                  notation: 'compact',
+                  maximumFractionDigits: 1,
+                }).format(Number(value));
+              },
+            },
+          },
+        },
+      },
+    });
+  }, [table]);
+
+  return <canvas ref={durationCanvasRef} style={{ maxHeight: '300px' }}></canvas>;
+}
+
 function ResultsCharts({ handleHideCharts, scores }: ResultsChartsProps) {
   const theme = useTheme();
   Chart.defaults.color = theme.palette.mode === 'dark' ? '#aaa' : '#666';
@@ -642,10 +855,25 @@ function ResultsCharts({ handleHideCharts, scores }: ResultsChartsProps) {
     showPerformanceOverTimeChart,
     //setShowPerformanceOverTimeChart
   ] = useState(false);
+  const [showTokensChart, setShowTokensChart] = useState(true);
+  const [showDurationChart, setShowDurationChart] = useState(true);
 
   // NOTE: Parent component is responsible for conditionally rendering the charts based on the table being
   // non-null.
   const { table, evalId } = useTableStore();
+
+  // Check if we have multiple providers to compare
+  const hasMultipleProviders = table && table.head.prompts.length >= 2;
+
+  // Check if we have token data
+  const hasTokenData = table?.head.prompts.some(
+    (prompt) => prompt.metrics?.tokenUsage?.total && prompt.metrics.tokenUsage.total > 0,
+  );
+
+  // Check if we have duration data
+  const hasDurationData = table?.head.prompts.some(
+    (prompt) => prompt.metrics?.totalLatencyMs && prompt.metrics.totalLatencyMs > 0,
+  );
 
   // TODO(Will): Release performance over time chart; it's been hidden for 10 months.
   // useEffect(() => {
@@ -693,6 +921,37 @@ function ResultsCharts({ handleHideCharts, scores }: ResultsChartsProps) {
         >
           <CloseIcon />
         </IconButton>
+
+        {/* Toggle controls for provider comparison charts */}
+        {hasMultipleProviders && (hasTokenData || hasDurationData) && (
+          <Box sx={{ mb: 2, display: 'flex', gap: 2 }}>
+            {hasTokenData && (
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={showTokensChart}
+                    onChange={(e) => setShowTokensChart(e.target.checked)}
+                    size="small"
+                  />
+                }
+                label="Token Usage"
+              />
+            )}
+            {hasDurationData && (
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={showDurationChart}
+                    onChange={(e) => setShowDurationChart(e.target.checked)}
+                    size="small"
+                  />
+                }
+                label="Latency"
+              />
+            )}
+          </Box>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
           <div style={{ width: chartWidth }}>
             <PassRateChart table={table!} />
@@ -714,6 +973,22 @@ function ResultsCharts({ handleHideCharts, scores }: ResultsChartsProps) {
             </div>
           )}
         </div>
+
+        {/* Provider comparison charts */}
+        {hasMultipleProviders && (showTokensChart || showDurationChart) && (
+          <Box sx={{ mt: 3, display: 'flex', gap: 2, justifyContent: 'space-between' }}>
+            {showTokensChart && hasTokenData && (
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <TokensChart table={table!} />
+              </Box>
+            )}
+            {showDurationChart && hasDurationData && (
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <DurationChart table={table!} />
+              </Box>
+            )}
+          </Box>
+        )}
       </Paper>
     </ErrorBoundary>
   );
