@@ -762,8 +762,9 @@ function DurationChart({ table }: ChartProps) {
     // Calculate average latency per provider
     const data = table.head.prompts.map((prompt) => {
       const totalLatency = prompt.metrics?.totalLatencyMs || 0;
-      const numRequests = prompt.metrics?.tokenUsage?.numRequests || 1;
-      return totalLatency / numRequests;
+      const numRequests = prompt.metrics?.tokenUsage?.numRequests || 0;
+      // Avoid division by zero - return 0 if no requests
+      return numRequests > 0 ? totalLatency / numRequests : 0;
     });
 
     const labels = table.head.prompts.map((prompt) => prompt.provider || 'Unknown');
@@ -806,9 +807,12 @@ function DurationChart({ table }: ChartProps) {
               footer: (tooltipItems) => {
                 const promptIdx = tooltipItems[0].dataIndex;
                 const prompt = table.head.prompts[promptIdx];
+                const totalLatencyMs = prompt.metrics?.totalLatencyMs || 0;
+                const completionTokens = prompt.metrics?.tokenUsage?.completion || 0;
+                // Avoid division by zero - check totalLatencyMs > 0
                 const tokensPerSec =
-                  prompt.metrics?.totalLatencyMs && prompt.metrics?.tokenUsage?.completion
-                    ? prompt.metrics.tokenUsage.completion / (prompt.metrics.totalLatencyMs / 1000)
+                  totalLatencyMs > 0 && completionTokens > 0
+                    ? completionTokens / (totalLatencyMs / 1000)
                     : 0;
                 return tokensPerSec > 0
                   ? `Tokens/Sec: ${Intl.NumberFormat(undefined, {
